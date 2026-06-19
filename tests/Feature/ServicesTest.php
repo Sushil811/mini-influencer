@@ -1,12 +1,12 @@
-<?php
-
 use App\Services\CircuitBreaker\RedisCircuitBreaker;
 use App\Services\RateLimiter\RedisQuotaTracker;
 use App\Services\RateLimiter\RedisRateLimiter;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Redis;
 
 beforeEach(function () {
     try {
+        Cache::flush();
         Redis::connection()->flushall();
     } catch (Exception $e) {
         // Ignored
@@ -59,9 +59,8 @@ test('quota tracker checks safety ceiling', function () {
 
     // Safety ceiling is 90% of 10 = 9.
     // If we set the quota count manually to 9, checkAndIncrement should refuse (return false)
-    $redis = Redis::connection();
     $date = now()->timezone('Asia/Kolkata')->format('Y-m-d');
-    $redis->set("quota:{$key}:{$date}", 9);
+    Cache::put("quota:{$key}:{$date}", 9, now()->addDays(2));
 
     $this->assertFalse($tracker->checkAndIncrement($key, 10));
 });

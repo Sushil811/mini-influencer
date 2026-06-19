@@ -2,7 +2,7 @@
 
 namespace App\Services\CircuitBreaker;
 
-use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Cache;
 
 class RedisCircuitBreaker
 {
@@ -24,17 +24,16 @@ class RedisCircuitBreaker
      */
     public function isOpen(): bool
     {
-        $redis = Redis::connection();
         $stateKey = "cb:state:{$this->name}";
         $openUntilKey = "cb:open_until:{$this->name}";
 
-        $state = $redis->get($stateKey) ?? 'CLOSED';
+        $state = Cache::get($stateKey) ?? 'CLOSED';
 
         if ($state === 'OPEN') {
-            $openUntil = (float) ($redis->get($openUntilKey) ?? 0);
+            $openUntil = (float) (Cache::get($openUntilKey) ?? 0);
             if (microtime(true) > $openUntil) {
                 // Cool down over: transition to HALF_OPEN to test a request
-                $redis->set($stateKey, 'HALF_OPEN');
+                Cache::put($stateKey, 'HALF_OPEN', now()->addDays(7));
 
                 return false;
             }
@@ -50,12 +49,11 @@ class RedisCircuitBreaker
      */
     public function recordSuccess(): void
     {
-        $redis = Redis::connection();
         $stateKey = "cb:state:{$this->name}";
         $failuresKey = "cb:failures:{$this->name}";
 
-        $redis->set($stateKey, 'CLOSED');
-        $redis->set($failuresKey, 0);
+        Cache::put($stateKey, 'CLOSED', now()->addDays(7));
+        Cache::put($failuresKey, 0, now()->addDays(7));
     }
 
     /**
@@ -63,16 +61,20 @@ class RedisCircuitBreaker
      */
     public function recordFailure(): void
     {
-        $redis = Redis::connection();
         $stateKey = "cb:state:{$this->name}";
         $failuresKey = "cb:failures:{$this->name}";
         $openUntilKey = "cb:open_until:{$this->name}";
 
-        $failures = (int) $redis->incr($failuresKey);
+        if (! Cache::has($failuresKey)) {
+            Cache::put($failuresKey, 1, now()->addDays(7));
+            $failures = 1;
+        } else {
+            $failures = (int) Cache::increment($failuresKey);
+        }
 
         if ($failures >= $this->threshold) {
-            $redis->set($stateKey, 'OPEN');
-            $redis->set($openUntilKey, microtime(true) + $this->cooldown);
+            Cache::put($stateKey, 'OPEN', now()->addDays(7));
+            Cache::put($openUntilKey, microtime(true) + $this->cooldown, now()->addDays(7));
         }
     }
 
@@ -81,9 +83,8 @@ class RedisCircuitBreaker
      */
     public function reset(): void
     {
-        $redis = Redis::connection();
-        $redis->del("cb:state:{$this->name}");
-        $redis->del("cb:failures:{$this->name}");
-        $redis->del("cb:open_until:{$this->name}");
+        Cache::forget("cb:state:{$this->name}");
+        Cache::forget("cb:failures:{$this->name}");
+        Cache::forget("cb:open_until:{$this->name}");
     }
 }

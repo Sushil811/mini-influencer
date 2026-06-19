@@ -6,7 +6,7 @@ use App\Jobs\FetchProfileJob;
 use App\Models\Profile;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Cache;
 
 class WebhookController extends Controller
 {
@@ -33,14 +33,11 @@ class WebhookController extends Controller
             return response()->json(['error' => 'Invalid HMAC signature.'], 401);
         }
 
-        // 2. Replay Protection (24-hour Redis check)
-        $redis = Redis::connection();
+        // 2. Replay Protection (24-hour Cache check)
         $nonceKey = "webhook:nonce:{$requestId}";
 
         // set NX with EX 86400 (24h)
-        /** @var mixed $redisClient */
-        $redisClient = $redis;
-        $isUnique = (bool) $redisClient->set($nonceKey, '1', 'EX', 86400, 'NX');
+        $isUnique = Cache::add($nonceKey, '1', 86400);
         if (! $isUnique) {
             return response()->json([
                 'error' => 'Replay attack detected. Request already processed in the last 24 hours.',
@@ -96,14 +93,11 @@ class WebhookController extends Controller
             return response()->json(['error' => 'Invalid HMAC signature.'], 401);
         }
 
-        // 2. Replay Protection (24-hour Redis check)
-        $redis = Redis::connection();
+        // 2. Replay Protection (24-hour Cache check)
         $nonceKey = "webhook:nonce:{$requestId}";
 
         // set NX with EX 86400 (24h)
-        /** @var mixed $redisClient */
-        $redisClient = $redis;
-        $isUnique = (bool) $redisClient->set($nonceKey, '1', 'EX', 86400, 'NX');
+        $isUnique = Cache::add($nonceKey, '1', 86400);
         if (! $isUnique) {
             return response()->json([
                 'error' => 'Replay attack detected. Request already processed in the last 24 hours.',

@@ -1,11 +1,11 @@
-<?php
-
 use App\Jobs\FetchProfileJob;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Redis;
 
 beforeEach(function () {
     try {
+        Cache::flush();
         Redis::connection()->flushall();
     } catch (Exception $e) {
         // Redis not running or configured differently

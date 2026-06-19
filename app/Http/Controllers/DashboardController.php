@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Profile;
 use App\Models\ProfileSnapshot;
 use App\Services\RateLimiter\RedisQuotaTracker;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Redis;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -45,9 +46,9 @@ class DashboardController extends Controller
             });
 
         // Redis System States
-        $cbState = Redis::connection()->get('cb:state:profile_fetch') ?? 'CLOSED';
+        $cbState = Cache::get('cb:state:profile_fetch') ?? 'CLOSED';
 
-        $tokens = Redis::connection()->get('rl:tokens:profile_fetch');
+        $tokens = Cache::get('rl:tokens:profile_fetch');
         $tokensRemaining = $tokens !== null ? round((float) $tokens, 1) : 30.0;
 
         $quota = new RedisQuotaTracker;

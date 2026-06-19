@@ -2,7 +2,7 @@
 
 namespace App\Services\RateLimiter;
 
-use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Cache;
 
 class RedisQuotaTracker
 {
@@ -15,12 +15,11 @@ class RedisQuotaTracker
      */
     public function checkAndIncrement(string $key = 'rapidapi', int $dailyLimit = 1000): bool
     {
-        $redis = Redis::connection();
         // Use IST date
         $date = now()->timezone('Asia/Kolkata')->format('Y-m-d');
         $quotaKey = "quota:{$key}:{$date}";
 
-        $current = (int) ($redis->get($quotaKey) ?? 0);
+        $current = (int) (Cache::get($quotaKey) ?? 0);
 
         // Refuse to dispatch when within 10% of the ceiling
         $ceilingSafetyMargin = (int) ($dailyLimit * 0.9);
@@ -29,8 +28,11 @@ class RedisQuotaTracker
         }
 
         // Increment and set expiry (48h) to clean up keys automatically
-        $redis->incr($quotaKey);
-        $redis->expire($quotaKey, 172800);
+        if (! Cache::has($quotaKey)) {
+            Cache::put($quotaKey, 1, now()->addDays(2));
+        } else {
+            Cache::increment($quotaKey);
+        }
 
         return true;
     }
@@ -40,9 +42,8 @@ class RedisQuotaTracker
      */
     public function getConsumedToday(string $key = 'rapidapi'): int
     {
-        $redis = Redis::connection();
         $date = now()->timezone('Asia/Kolkata')->format('Y-m-d');
 
-        return (int) ($redis->get("quota:{$key}:{$date}") ?? 0);
+        return (int) (Cache::get("quota:{$key}:{$date}") ?? 0);
     }
 }

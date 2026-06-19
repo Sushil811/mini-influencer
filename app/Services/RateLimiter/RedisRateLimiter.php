@@ -2,7 +2,7 @@
 
 namespace App\Services\RateLimiter;
 
-use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Cache;
 
 class RedisRateLimiter
 {
@@ -16,28 +16,27 @@ class RedisRateLimiter
      */
     public function acquire(string $key = 'profile_fetch', int $capacity = 30, float $refillRate = 0.5): bool
     {
-        $redis = Redis::connection();
         $now = microtime(true);
 
         $lockKey = "rl:lock:{$key}";
         $tokensKey = "rl:tokens:{$key}";
         $lastRefillKey = "rl:refill:{$key}";
 
-        // Atomic lock to update bucket state
-        /** @var mixed $redisClient */
-        $redisClient = $redis;
-        $lock = $redisClient->set($lockKey, '1', 'EX', 2, 'NX');
-        if (! $lock) {
+        // Use Laravel Cache atomic locks (works on Redis, DB, Memcached, etc.)
+        $lock = Cache::lock($lockKey, 2);
+
+        $acquired = $lock->get();
+        if (! $acquired) {
             usleep(25000); // 25ms delay retry
-            $lock = $redisClient->set($lockKey, '1', 'EX', 2, 'NX');
-            if (! $lock) {
+            $acquired = $lock->get();
+            if (! $acquired) {
                 return false;
             }
         }
 
         try {
-            $tokens = $redis->get($tokensKey);
-            $lastRefill = $redis->get($lastRefillKey);
+            $tokens = Cache::get($tokensKey);
+            $lastRefill = Cache::get($lastRefillKey);
 
             if ($tokens === null) {
                 // Initialize
@@ -56,20 +55,20 @@ class RedisRateLimiter
 
             if ($tokens >= 1.0) {
                 $tokens -= 1.0;
-                $redis->set($tokensKey, $tokens);
-                $redis->set($lastRefillKey, $lastRefill);
+                Cache::put($tokensKey, $tokens, now()->addDays(7));
+                Cache::put($lastRefillKey, $lastRefill, now()->addDays(7));
 
                 return true;
             }
 
             // Save state even on failure (preserves timestamp updates)
-            $redis->set($tokensKey, $tokens);
-            $redis->set($lastRefillKey, $lastRefill);
+            Cache::put($tokensKey, $tokens, now()->addDays(7));
+            Cache::put($lastRefillKey, $lastRefill, now()->addDays(7));
 
             return false;
 
         } finally {
-            $redis->del($lockKey);
+            $lock->release();
         }
     }
 }

@@ -6,6 +6,8 @@ use App\Services\CircuitBreaker\RedisCircuitBreaker;
 use App\Services\RateLimiter\RedisQuotaTracker;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
@@ -18,16 +20,14 @@ class SystemHealthController extends Controller
      */
     public function index(): Response
     {
-        $redis = Redis::connection();
-
         // 1. Circuit Breaker Details
-        $cbState = $redis->get('cb:state:profile_fetch') ?? 'CLOSED';
-        $cbFailures = (int) ($redis->get('cb:failures:profile_fetch') ?? 0);
-        $cbOpenUntil = (float) ($redis->get('cb:open_until:profile_fetch') ?? 0);
+        $cbState = Cache::get('cb:state:profile_fetch') ?? 'CLOSED';
+        $cbFailures = (int) (Cache::get('cb:failures:profile_fetch') ?? 0);
+        $cbOpenUntil = (float) (Cache::get('cb:open_until:profile_fetch') ?? 0);
         $cbCooldownRemaining = max(0, round($cbOpenUntil - microtime(true), 1));
 
         // 2. Token Bucket Rate Limiter Details
-        $tokens = $redis->get('rl:tokens:profile_fetch');
+        $tokens = Cache::get('rl:tokens:profile_fetch');
         $tokensRemaining = $tokens !== null ? round((float) $tokens, 1) : 30.0;
 
         // 3. Quota details
@@ -38,13 +38,16 @@ class SystemHealthController extends Controller
         $webhookSecret = (string) config('services.webhook.secret', 'exhibit_social_webhook_secret_key');
 
         // Check for cached nonces
-        $nonceKeys = [];
+        $noncesCount = 0;
         try {
-            $nonceKeys = $redis->keys('webhook:nonce:*');
+            if (config('cache.default') === 'redis') {
+                $noncesCount = count(Redis::connection()->keys('webhook:nonce:*'));
+            } else {
+                $noncesCount = DB::table('cache')->where('key', 'like', '%webhook:nonce:%')->count();
+            }
         } catch (\Exception $e) {
-            // Keys command may not be supported in some cluster configurations, fallback
+            // Fallback
         }
-        $noncesCount = count($nonceKeys);
 
         return Inertia::render('system-health', [
             'cb' => [
