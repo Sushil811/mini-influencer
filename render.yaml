@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: mini-influencer-web
+    env: docker
+    plan: free
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: false
+      - key: APP_KEY
+        generateValue: true
+      - key: APP_URL
+        value: https://mini-influencer-web.onrender.com
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_HOST
+        fromDatabase:
+          name: mini-influencer-db
+          property: host
+      - key: DB_DATABASE
+        fromDatabase:
+          name: mini-influencer-db
+          property: database
+      - key: DB_USERNAME
+        fromDatabase:
+          name: mini-influencer-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: mini-influencer-db
+          property: password
+      - key: DB_PORT
+        value: "5432"
+      - key: REDIS_CLIENT
+        value: predis
+      - key: REDIS_HOST
+        sync: false # User will input this from Upstash
+      - key: REDIS_PORT
+        value: "6379"
+      - key: REDIS_PASSWORD
+        sync: false # User will input this from Upstash
+      - key: WEBHOOK_SECRET
+        value: exhibit_social_webhook_secret_key
+
+databases:
+  - name: mini-influencer-db
+    plan: free
