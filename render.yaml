@@ -4,14 +4,16 @@ services:
     env: docker
     plan: free
     envVars:
+      - key: APP_NAME
+        value: MiniInfluencer
       - key: APP_ENV
         value: production
       - key: APP_DEBUG
         value: false
-      - key: APP_KEY
-        generateValue: true
       - key: APP_URL
         value: https://mini-influencer-web.onrender.com
+
+      # Database
       - key: DB_CONNECTION
         value: pgsql
       - key: DB_HOST
@@ -32,14 +34,44 @@ services:
           property: password
       - key: DB_PORT
         value: "5432"
+
+      # Session — use database driver (no Redis dependency for auth)
+      - key: SESSION_DRIVER
+        value: database
+      - key: SESSION_LIFETIME
+        value: "120"
+      - key: SESSION_SECURE_COOKIE
+        value: true
+
+      # Cache & Queue — use database (no Redis dependency for auth)
+      - key: CACHE_STORE
+        value: database
+      - key: QUEUE_CONNECTION
+        value: database
+
+      # Logging
+      - key: LOG_CHANNEL
+        value: stderr
+      - key: LOG_LEVEL
+        value: warning
+
+      # Mail — disable verification emails in production (log only)
+      - key: MAIL_MAILER
+        value: log
+
+      # Redis — for circuit breaker, rate limiter, and webhook nonces only
       - key: REDIS_CLIENT
         value: predis
       - key: REDIS_HOST
-        sync: false # User will input this from Upstash
+        sync: false # Set this from your Upstash Redis dashboard
       - key: REDIS_PORT
         value: "6379"
       - key: REDIS_PASSWORD
-        sync: false # User will input this from Upstash
+        sync: false # Set this from your Upstash Redis dashboard
+
+      # App Security
+      - key: APP_KEY
+        generateValue: true
       - key: WEBHOOK_SECRET
         value: exhibit_social_webhook_secret_key
 
