@@ -48,61 +48,69 @@ class FetchProfileJob implements ShouldQueue
         $limiter = new RedisRateLimiter;
         $quota = new RedisQuotaTracker;
 
-        // 1. Circuit Breaker Check
-        if ($cb->isOpen()) {
-            Log::warning((string) json_encode([
-                'job_id' => $jobId,
-                'profile_id' => $this->profileId,
-                'attempt' => $this->attempt,
-                'duration_ms' => 0,
-                'outcome' => 'circuit_breaker_open',
-            ]));
+        // 1. Circuit Breaker Check (fail-open: if cache unavailable, proceed anyway)
+        try {
+            if ($cb->isOpen()) {
+                Log::warning((string) json_encode([
+                    'job_id' => $jobId,
+                    'profile_id' => $this->profileId,
+                    'attempt' => $this->attempt,
+                    'duration_ms' => 0,
+                    'outcome' => 'circuit_breaker_open',
+                ]));
 
-            // Defer the job (retry in 2 minutes once circuit is ready to test)
-            self::dispatch($this->profileId, $this->attempt)
-                ->delay(now()->addMinutes(2));
+                // Defer the job (retry in 2 minutes once circuit is ready to test)
+                self::dispatch($this->profileId, $this->attempt)
+                    ->delay(now()->addMinutes(2));
 
-            return;
+                return;
+            }
+        } catch (\Exception $e) {
+            Log::warning('CircuitBreaker check failed, proceeding anyway: ' . $e->getMessage());
         }
 
-        // 2. Rate Limiting + Quota Check
-        // Daily YouTube/RapidAPI scraping quota ceiling: e.g., 1000 requests max
-        $dailyLimit = 1000;
-        $quotaAllowed = $quota->checkAndIncrement('rapidapi', $dailyLimit);
+        // 2. Rate Limiting + Quota Check (fail-open: if cache unavailable, skip throttling)
+        try {
+            // Daily YouTube/RapidAPI scraping quota ceiling: e.g., 1000 requests max
+            $dailyLimit = 1000;
+            $quotaAllowed = $quota->checkAndIncrement('rapidapi', $dailyLimit);
 
-        if (! $quotaAllowed) {
-            Log::error((string) json_encode([
-                'job_id' => $jobId,
-                'profile_id' => $this->profileId,
-                'attempt' => $this->attempt,
-                'duration_ms' => 0,
-                'outcome' => 'quota_limit_exceeded_warning',
-            ]));
+            if (! $quotaAllowed) {
+                Log::error((string) json_encode([
+                    'job_id' => $jobId,
+                    'profile_id' => $this->profileId,
+                    'attempt' => $this->attempt,
+                    'duration_ms' => 0,
+                    'outcome' => 'quota_limit_exceeded_warning',
+                ]));
 
-            // Re-dispatch with exponential backoff delay (don't mark as failed)
-            $delay = pow(2, $this->attempt - 1);
-            self::dispatch($this->profileId, $this->attempt + 1)
-                ->delay(now()->addMinutes($delay));
+                // Re-dispatch with exponential backoff delay (don't mark as failed)
+                $delay = pow(2, $this->attempt - 1);
+                self::dispatch($this->profileId, $this->attempt + 1)
+                    ->delay(now()->addMinutes($delay));
 
-            return;
-        }
+                return;
+            }
 
-        // Token bucket checks
-        if (! $limiter->acquire('profile_fetch')) {
-            Log::warning((string) json_encode([
-                'job_id' => $jobId,
-                'profile_id' => $this->profileId,
-                'attempt' => $this->attempt,
-                'duration_ms' => 0,
-                'outcome' => 'rate_limit_bucket_empty',
-            ]));
+            // Token bucket checks
+            if (! $limiter->acquire('profile_fetch')) {
+                Log::warning((string) json_encode([
+                    'job_id' => $jobId,
+                    'profile_id' => $this->profileId,
+                    'attempt' => $this->attempt,
+                    'duration_ms' => 0,
+                    'outcome' => 'rate_limit_bucket_empty',
+                ]));
 
-            // Re-dispatch with exponential backoff delay
-            $delay = pow(2, $this->attempt - 1);
-            self::dispatch($this->profileId, $this->attempt + 1)
-                ->delay(now()->addMinutes($delay));
+                // Re-dispatch with exponential backoff delay
+                $delay = pow(2, $this->attempt - 1);
+                self::dispatch($this->profileId, $this->attempt + 1)
+                    ->delay(now()->addMinutes($delay));
 
-            return;
+                return;
+            }
+        } catch (\Exception $e) {
+            Log::warning('Rate limiter / quota check failed, proceeding anyway: ' . $e->getMessage());
         }
 
         // 3. Concurrency safety: SELECT ... FOR UPDATE SKIP LOCKED
@@ -163,7 +171,11 @@ class FetchProfileJob implements ShouldQueue
             });
 
             // Reset failures on success
-            $cb->recordSuccess();
+            try {
+                $cb->recordSuccess();
+            } catch (\Exception $e) {
+                Log::warning('CircuitBreaker recordSuccess failed: ' . $e->getMessage());
+            }
 
         } catch (FatalProfileException $e) {
             $outcome = 'fatal_failure';
@@ -175,7 +187,11 @@ class FetchProfileJob implements ShouldQueue
 
         } catch (RetriableProfileException $e) {
             $outcome = 'retriable_failure';
-            $cb->recordFailure();
+            try {
+                $cb->recordFailure();
+            } catch (\Exception $cbEx) {
+                Log::warning('CircuitBreaker recordFailure failed: ' . $cbEx->getMessage());
+            }
 
             if ($this->attempt >= 5) {
                 $profile->update([
