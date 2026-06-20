@@ -13,6 +13,11 @@ services:
       - key: APP_URL
         value: https://mini-influencer-web.onrender.com
 
+      # Profile Scraping — use mock/fake providers on Render since Instagram/YouTube
+      # block HTTP scraping from data-center IPs. Mock providers return realistic data.
+      - key: SCRAPER_MOCK
+        value: true
+
       # Database
       - key: DB_CONNECTION
         value: pgsql
